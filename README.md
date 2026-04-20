@@ -1,57 +1,24 @@
-# Sample Hardhat 3 Beta Project (`node:test` and `viem`)
+# Домашнее задание: Оптимизация смарт-контрактов и Data Locations в EVM
 
-This project showcases a Hardhat 3 Beta project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
+## Описание проекта
+В данном репозитории реализованы два смарт-контракта для демонстрации работы с различными областями памяти в EVM (Ethereum Virtual Machine) и методов оптимизации газа:
+1. `DataLocationsUnoptimized.sol` — контракт с неоптимальным использованием хранилища и памяти.
+2. `DataLocationsOptimized.sol` — оптимизированная версия, минимизирующая обращения к `storage` и избегающая лишнего копирования данных.
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+В проекте написаны unit-тесты на чистом Solidity (Foundry-style, `test/Simple.sol`), которые проверяют корректность бизнес-логики и проводят сравнение потребления газа между двумя реализациями.
 
-## Project Overview
+## Разбор использования областей памяти (Data Locations)
+В ходе выполнения работы были задействованы 4 основные области:
 
-This example project includes:
+* **Storage (Хранилище):** Используется для постоянного хранения состояния контракта (массив `numbers` и переменная `totalSum`). Это самая дорогая для взаимодействия область. В неоптимизированном контракте запись в `storage` происходила на каждой итерации цикла. В оптимизированном — результат накапливался локально, а запись в `storage` производилась только 1 раз в конце работы функции.
+* **Memory (Память):** Линейная временная область. В неоптимизированном контракте аргумент функции `uint256[] memory _input` копировал весь массив из транзакции в память, расходуя газ на аллокацию. В тестах (`Simple.sol`) `memory` используется для создания тестовых массивов перед их передачей в контракт.
+* **Calldata (Данные вызова):** Неизменяемая область данных транзакции. В оптимизированной версии заменил `memory` на `calldata` (`uint256[] calldata _input`). Это позволило читать данные напрямую, минуя стадию дорогого копирования в `memory`.
+* **Stack (Стек):** Используется для простых локальных переменных. В оптимизированном контракте в стеке хранятся: переменная цикла `i`, кешированная длина массива `length` и временный аккумулятор суммы `tempSum`. Операции со стеком (например, сложение `tempSum += doubled`) стоят минимальное количество газа (около 3 единиц) по сравнению с обращениями к `storage`.
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+## Результаты замеров газа
+Оптимизация (переход на `calldata`, кеширование длины массива и работа со стеком вместо `storage` внутри цикла) дала существенный прирост производительности.
 
-## Usage
-
-### Running Tests
-
-To run all the tests in the project, execute the following command:
-
-```shell
-npx hardhat test
-```
-
-You can also selectively run the Solidity or `node:test` tests:
-
-```shell
-npx hardhat test solidity
-npx hardhat test nodejs
-```
-
-### Make a deployment to Sepolia
-
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
-
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
-
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
-
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
-
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+Замер проводился с использованием функции `gasleft()` на массиве из 50 элементов:
+* **До оптимизации (Unoptimized):** 1 248 740 gas
+* **После оптимизации (Optimized):** 1 211 652 gas
+* **Сэкономлено:** 37 088 gas
